@@ -47,7 +47,7 @@ extern "C" {
 
 #define USB_HID_CONFIG_DESC_SIZ                    34U
 #define USB_HID_DESC_SIZ                           9U
-#define HID_MOUSE_REPORT_DESC_SIZE                 74U
+#define HID_DEVICE_REPORT_DESC_SIZE                51U
 
 #define HID_DESCRIPTOR_TYPE                        0x21U
 #define HID_REPORT_DESC                            0x22U
@@ -90,6 +90,16 @@ typedef struct
   uint32_t AltSetting;
   USBD_HID_StateTypeDef state;
 } USBD_HID_HandleTypeDef;
+
+typedef struct
+{
+    uint16_t rx;
+    uint16_t ry;
+    uint16_t rz;
+    uint16_t slider;
+    uint16_t dial;
+    uint64_t buttons;
+} __attribute__((__packed__)) Joystick_HID_TypeDef;
 
 /*
  * HID Class specification version 1.1
