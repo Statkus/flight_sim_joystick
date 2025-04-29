@@ -86,6 +86,9 @@ void Error_Handler(void);
 
 /* USER CODE BEGIN Private defines */
 
+#define LOW_PASS_FILTER_COEF        0.5
+#define TEMPORAL_FILTER_WINDOW_SIZE 5
+
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

@@ -23,6 +23,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+#include "usbd_hid.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -58,10 +60,15 @@ static void MX_ADC1_Init(void);
 static void MX_TIM1_Init(void);
 /* USER CODE BEGIN PFP */
 
+uint16_t Low_Pass_Filter_ADC(uint32_t new_value, uint16_t previous_value);
+uint16_t Temporal_Filter_ADC(uint32_t new_value, uint16_t* value_buffer, uint8_t* value_buffer_index);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+uint8_t new_ADC_data = 0;
 
 /* USER CODE END 0 */
 
@@ -100,6 +107,18 @@ int main(void)
   MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
 
+  Joystick_HID_TypeDef joystick_HID          = {0};
+  Joystick_HID_TypeDef previous_joystick_HID = {0};
+
+  uint32_t ADC_DMA_buffer[5] = {0};
+
+  uint16_t ADC_value_buffer[5][TEMPORAL_FILTER_WINDOW_SIZE] = {0};
+  uint8_t ADC_value_buffer_index[5]                         = {0};
+
+  HAL_ADC_Start_DMA(&hadc1, ADC_DMA_buffer, 5);
+
+  HAL_TIM_Base_Start_IT(&htim1);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -109,6 +128,44 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+    /* Handle joystick ---------------------------------------------------------------------------*/
+    if (new_ADC_data == 1)
+    {
+      new_ADC_data = 0;
+
+      //joystick_HID.rx     = Low_Pass_Filter_ADC(ADC_DMA_buffer[0], joystick_HID.rx);
+      //joystick_HID.ry     = Low_Pass_Filter_ADC(ADC_DMA_buffer[1], joystick_HID.ry);
+      //joystick_HID.rz     = Low_Pass_Filter_ADC(ADC_DMA_buffer[2], joystick_HID.rz);
+      //joystick_HID.slider = Low_Pass_Filter_ADC(ADC_DMA_buffer[3], joystick_HID.slider);
+      //joystick_HID.dial   = Low_Pass_Filter_ADC(ADC_DMA_buffer[4], joystick_HID.dial);
+
+      joystick_HID.rx     = Temporal_Filter_ADC(ADC_DMA_buffer[0], ADC_value_buffer[0], &ADC_value_buffer_index[0]);
+      joystick_HID.ry     = Temporal_Filter_ADC(ADC_DMA_buffer[1], ADC_value_buffer[1], &ADC_value_buffer_index[1]);
+      joystick_HID.rz     = Temporal_Filter_ADC(ADC_DMA_buffer[2], ADC_value_buffer[2], &ADC_value_buffer_index[2]);
+      joystick_HID.slider = Temporal_Filter_ADC(ADC_DMA_buffer[3], ADC_value_buffer[3], &ADC_value_buffer_index[3]);
+      joystick_HID.dial   = Temporal_Filter_ADC(ADC_DMA_buffer[4], ADC_value_buffer[4], &ADC_value_buffer_index[4]);
+
+      HAL_ADC_Start_DMA(&hadc1, ADC_DMA_buffer, 5);
+    }
+
+    if (joystick_HID.buttons != previous_joystick_HID.buttons
+     || joystick_HID.rx      != previous_joystick_HID.rx
+     || joystick_HID.ry      != previous_joystick_HID.ry
+     || joystick_HID.rz      != previous_joystick_HID.rz
+     || joystick_HID.slider  != previous_joystick_HID.slider
+     || joystick_HID.dial    != previous_joystick_HID.dial)
+    {
+      USBD_HID_SendReport(&hUsbDeviceFS, (uint8_t*)&joystick_HID, sizeof(Joystick_HID_TypeDef));
+      HAL_Delay(20);
+    }
+
+    previous_joystick_HID.buttons = joystick_HID.buttons;
+    previous_joystick_HID.rx      = joystick_HID.rx;
+    previous_joystick_HID.ry      = joystick_HID.ry;
+    previous_joystick_HID.rz      = joystick_HID.rz;
+    previous_joystick_HID.slider  = joystick_HID.slider;
+    previous_joystick_HID.dial    = joystick_HID.dial;
   }
   /* USER CODE END 3 */
 }
@@ -357,6 +414,55 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
+{
+    new_ADC_data = 1;
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
+{
+  // Heartbeat LED at 1Hz
+  static uint16_t LED_counter = 0;
+
+  if (LED_counter > 500)
+  {
+    HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
+    LED_counter = 0;
+  }
+  else
+  {
+    LED_counter++;
+  }
+}
+
+uint16_t Low_Pass_Filter_ADC(uint32_t new_value, uint16_t previous_value)
+{
+  return (uint16_t)((float)previous_value + (((float)(MIN(new_value, 4096)) - (float)previous_value) * LOW_PASS_FILTER_COEF));
+}
+
+uint16_t Temporal_Filter_ADC(uint32_t new_value, uint16_t* value_buffer, uint8_t* value_buffer_index)
+{
+  value_buffer[*value_buffer_index] = (uint16_t)(MIN(new_value, 4096));
+
+  if (*value_buffer_index < TEMPORAL_FILTER_WINDOW_SIZE - 1)
+  {
+    ++*value_buffer_index;
+  }
+  else
+  {
+    *value_buffer_index = 0;
+  }
+
+  uint32_t sum_value = 0;
+
+  for (int i = 0; i < TEMPORAL_FILTER_WINDOW_SIZE; i++)
+  {
+    sum_value += value_buffer[i];
+  }
+
+  return (uint16_t)(sum_value / TEMPORAL_FILTER_WINDOW_SIZE);
+}
+
 /* USER CODE END 4 */
 
 /**
@@ -385,8 +491,6 @@ void Error_Handler(void)
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
