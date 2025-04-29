@@ -23,6 +23,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+#include "usbd_hid.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -63,6 +65,8 @@ static void MX_TIM1_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+uint8_t new_ADC_data = 0;
+
 /* USER CODE END 0 */
 
 /**
@@ -100,6 +104,15 @@ int main(void)
   MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
 
+  Joystick_HID_TypeDef joystick_HID          = {0};
+  Joystick_HID_TypeDef previous_joystick_HID = {0};
+
+  uint32_t ADC_DMA_buffer[5] = {0};
+
+  HAL_ADC_Start_DMA(&hadc1, ADC_DMA_buffer, 5);
+
+  HAL_TIM_Base_Start_IT(&htim1);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -109,6 +122,38 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+    /* Handle joystick ---------------------------------------------------------------------------*/
+    if (new_ADC_data == 1)
+    {
+      new_ADC_data = 0;
+
+      joystick_HID.rx     = (uint16_t)(MIN (ADC_DMA_buffer[0], 4096));
+      joystick_HID.ry     = (uint16_t)(MIN (ADC_DMA_buffer[1], 4096));
+      joystick_HID.rz     = (uint16_t)(MIN (ADC_DMA_buffer[2], 4096));
+      joystick_HID.slider = (uint16_t)(MIN (ADC_DMA_buffer[3], 4096));
+      joystick_HID.dial   = (uint16_t)(MIN (ADC_DMA_buffer[4], 4096));
+
+      HAL_ADC_Start_DMA(&hadc1, ADC_DMA_buffer, 5);
+    }
+
+    if (joystick_HID.buttons != previous_joystick_HID.buttons
+     || joystick_HID.rx      != previous_joystick_HID.rx
+     || joystick_HID.ry      != previous_joystick_HID.ry
+     || joystick_HID.rz      != previous_joystick_HID.rz
+     || joystick_HID.slider  != previous_joystick_HID.slider
+     || joystick_HID.dial    != previous_joystick_HID.dial)
+    {
+      USBD_HID_SendReport(&hUsbDeviceFS, (uint8_t*)&joystick_HID, sizeof(Joystick_HID_TypeDef));
+      HAL_Delay(20);
+    }
+
+    previous_joystick_HID.buttons = joystick_HID.buttons;
+    previous_joystick_HID.rx      = joystick_HID.rx;
+    previous_joystick_HID.ry      = joystick_HID.ry;
+    previous_joystick_HID.rz      = joystick_HID.rz;
+    previous_joystick_HID.slider  = joystick_HID.slider;
+    previous_joystick_HID.dial    = joystick_HID.dial;
   }
   /* USER CODE END 3 */
 }
@@ -340,6 +385,27 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
+{
+    new_ADC_data = 1;
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
+{
+  // Heartbeat LED at 1Hz
+  static uint16_t LED_counter = 0;
+
+  if (LED_counter > 500)
+  {
+    HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
+    LED_counter = 0;
+  }
+  else
+  {
+    LED_counter++;
+  }
+}
+
 /* USER CODE END 4 */
 
 /**
@@ -368,8 +434,6 @@ void Error_Handler(void)
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
