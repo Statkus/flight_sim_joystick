@@ -63,6 +63,8 @@ static void MX_TIM1_Init(void);
 uint16_t Low_Pass_Filter_ADC(uint32_t new_value, uint16_t previous_value);
 uint16_t Temporal_Filter_ADC(uint32_t new_value, uint16_t* value_buffer, uint8_t* value_buffer_index);
 
+uint16_t Read_Shift_Register(void);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -147,6 +149,8 @@ int main(void)
       joystick_HID.dial   = Temporal_Filter_ADC(ADC_DMA_buffer[4], ADC_value_buffer[4], &ADC_value_buffer_index[4]);
 
       HAL_ADC_Start_DMA(&hadc1, ADC_DMA_buffer, 5);
+
+      joystick_HID.buttons = (uint64_t)(Read_Shift_Register());
     }
 
     if (joystick_HID.buttons != previous_joystick_HID.buttons
@@ -461,6 +465,35 @@ uint16_t Temporal_Filter_ADC(uint32_t new_value, uint16_t* value_buffer, uint8_t
   }
 
   return (uint16_t)(sum_value / TEMPORAL_FILTER_WINDOW_SIZE);
+}
+
+uint16_t Read_Shift_Register(void)
+{
+  // Set clock low
+  HAL_GPIO_WritePin(SR_CLOCK_GPIO_Port, SR_CLOCK_Pin, GPIO_PIN_RESET);
+
+  // Latch impulse
+  HAL_GPIO_WritePin(SR_LATCH_GPIO_Port, SR_LATCH_Pin, GPIO_PIN_SET);
+  for (int i = 0; i < SHIFT_REGISTER_TICK_DELAY; i++) __NOP();
+  HAL_GPIO_WritePin(SR_LATCH_GPIO_Port, SR_LATCH_Pin, GPIO_PIN_RESET);
+
+  uint16_t data = 0;
+
+  for (int bit_index = 0; bit_index < 16; bit_index++)
+  {
+    HAL_GPIO_WritePin(SR_CLOCK_GPIO_Port, SR_CLOCK_Pin, GPIO_PIN_RESET);
+    for (int i = 0; i < SHIFT_REGISTER_TICK_DELAY; i++) __NOP();
+
+    if (HAL_GPIO_ReadPin(SR_DATA_GPIO_Port, SR_DATA_Pin) == GPIO_PIN_RESET)
+    {
+      data |= 0x8000 >> bit_index;
+    }
+
+    HAL_GPIO_WritePin(SR_CLOCK_GPIO_Port, SR_CLOCK_Pin, GPIO_PIN_SET);
+    for (int i = 0; i < SHIFT_REGISTER_TICK_DELAY; i++) __NOP();
+  }
+
+  return data;
 }
 
 /* USER CODE END 4 */
